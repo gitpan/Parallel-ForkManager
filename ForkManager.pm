@@ -78,12 +78,16 @@ Instantiate a new Parallel::ForkManager object. You must specify the maximum
 number of children to fork off. If you specify 0 (zero), then no children 
 will be forked. This is intended for debugging purposes.
 
-=item start
+=item start [ $process_identifier ]
 
 This method does the fork. It returns the pid of the child process for 
 the parent, and 0 for the child process. If the $processes parameter 
 for the constructor is 0 then, assuming you're in the child process, 
 $pm->start simply returns 0.
+
+An optional $process_identifier can be provided to this method... It is used by 
+the "run_on_finish" callback (see CALLBACKS) for identifying the finished
+process.
 
 =item finish [ $exit_code ]
 
@@ -107,7 +111,7 @@ forked. This is a blocking wait.
 =head1 CALLBACKS
 
 You can define callbacks in the code, which are called on events like starting 
-a process or on finish.
+a process or upon finish.
 
 The callbacks can be defined with the following methods:
 
@@ -121,8 +125,10 @@ called in the parent process.
 The paremeters of the $code are the following:
 
   - pid of the process, which is terminated
-  - exit status
+  - exit code of the program
   - identification of the process (if provided in the "start" method)
+  - exit signal (0-127: signal name)
+  - core dump (1 if there was core dump at exit)
 
 =item run_on_start $code
 
@@ -132,14 +138,15 @@ after the successful startup of a child in the parent process.
 The parameters of the $code are the following:
 
   - pid of the process which has been started
+  - identification of the process (if provided in the "start" method)
 
 =item run_on_wait $code
 
-You can define a subroutine which is canned when the child process needs to wait
-for the startup. One call has been done per children, and this is called only
+You can define a subroutine which is called when the child process needs to wait
+for the startup. One call is done per child, and this is called only
 in the "start" method, it is not called in "wait_all_children".
 
-No parameters are passwd to the $code.
+No parameters are passed to the $code.
 
 =back
 
@@ -147,7 +154,7 @@ No parameters are passwd to the $code.
 
 =head2 Parallel get
 
-This small example can be used to get URLs parallelly.
+This small example can be used to get URLs in parallel.
 
   use Parallel::ForkManager;
   use LWP::Simple;
@@ -215,6 +222,11 @@ Example of a program using callbacks to get child exit codes:
   $pm->wait_all_children;
   print "Everybody is out of the pool!\n";
 
+=head1 BUGS AND LIMITATIONS
+
+Do not use Parallel::ForkManager with fork and wait. Do not use more than one 
+copy of Parallel::ForkManager in one process!
+
 =head1 COPYRIGHT
 
 Copyright (c) 2000 Szabó, Balázs (dLux)
@@ -226,7 +238,8 @@ and/or modify it under the same terms as Perl itself.
 
   dLux (Szabó, Balázs) <dlux@kapu.hu>
   Noah Robin <sitz@onastick.net> (documentation tweaks)
-  Chuck Hirstius <Chuck.Hirstius@walgreens.com> (callback exit status, example)
+  Chuck Hirstius <chirstius@megapathdsl.net> (callback exit status, example)
+  Grant Hopwood <hopwoodg@valero.com> (win32 port)
 
 =cut
 
@@ -234,7 +247,7 @@ package Parallel::ForkManager;
 use POSIX ":sys_wait_h";
 use strict;
 use vars qw($VERSION);
-$VERSION='0.7';
+$VERSION='0.7.2';
 
 sub new { my ($c,$processes)=@_;
   my $h={
@@ -248,7 +261,7 @@ sub new { my ($c,$processes)=@_;
 sub start { my ($s,$identification)=@_;
   die "Cannot start another process while you are in the child process"
     if $s->{in_child};
-  while ( ( keys %{ $s->{processes} } ) >=$s->{max_proc}) {
+  while ( ( keys %{ $s->{processes} } ) >= $s->{max_proc}) {
     $s->on_wait;
     $s->wait_one_child;
   };
@@ -270,10 +283,9 @@ sub start { my ($s,$identification)=@_;
   }
 }
 
-# finish changed by CAH to accept child's passed in exit code
 sub finish { my ($s, $x)=@_;
   if ( $s->{in_child} ) {
-    exit $x || 0;
+    exit ($x || 0);
   }
   return 0;
 }
@@ -283,16 +295,26 @@ sub wait_children { my ($s)=@_;
   my $kid;
   do {
     $kid = $s->wait_one_child(&WNOHANG);
-  } while $kid > 0;
+  } while $kid > 0 || $kid < -1; # AS 5.6/Win32 returns negative PIDs
 };
 
 *wait_childs=*wait_children; # compatibility
 
 sub wait_one_child ($;$) { my ($s,$par)=@_;
-  my $kid = waitpid(-1,$par||=0);
-  if ($kid>0) {
-    $s->on_finish($kid, $? >> 8 ,$s->{processes}->{$kid});
+  my $kid;
+  while (1) {
+    $kid = _waitpid(-1,$par||=0);
+    last if $kid == 0 || $kid == -1; # AS 5.6/Win32 returns negative PIDs
+    redo if !exists $s->{processes}->{$kid};
+    $s->on_finish(
+      $kid, 
+      $? >> 8 ,
+      $s->{processes}->{$kid}, 
+      $? & 0x7f, 
+      $? & 0x80 ? 1 : 0
+    );
     delete $s->{processes}->{$kid};
+    last;
   }
   $kid;
 };
@@ -329,7 +351,39 @@ sub on_start { my ($s,@par)=@_;
 };
 
 sub set_max_procs { my ($s, $mp)=@_;
-	$s->{max_proc} = $mp;
+  $s->{max_proc} = $mp;
+}
+
+# OS dependant code follows...
+
+sub _waitpid { # Call waitpid() in the standard Unix fashion.
+  return waitpid($_[0],$_[1]);
+}
+
+# On ActiveState Perl 5.6/Win32 build 625, waitpid(-1, &WNOHANG) always
+# blocks unless an actual PID other than -1 is given.
+sub _NT_waitpid { my ($s, $pid, $par) = @_;
+  if ($par == &WNOHANG) { # Need to nonblock on each of our PIDs in the pool.
+    my @pids = keys %{ $s->{processes} };
+    # Simulate -1 (no processes awaiting cleanup.)
+    return -1 unless scalar(@pids);
+    # Check each PID in the pool.
+    my $kid;
+    foreach $pid (@pids) {
+      $kid = waitpid($pid, $par);
+      return $kid if $kid != 0; # AS 5.6/Win32 returns negative PIDs.
+    }
+    return $kid;
+  } else { # Normal waitpid() call.
+    return waitpid($pid, $par);
+  }
+}
+
+{
+  local $^W = 0;
+  if ($^O eq 'NT' or $^O eq 'MSWin32') {
+    *_waitpid = \&_NT_waitpid;
+  }
 }
 
 1;
