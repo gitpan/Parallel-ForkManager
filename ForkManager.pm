@@ -237,9 +237,13 @@ and/or modify it under the same terms as Perl itself.
 =head1 AUTHOR
 
   dLux (Szabó, Balázs) <dlux@kapu.hu>
+
+=head1 CREDITS
+
   Noah Robin <sitz@onastick.net> (documentation tweaks)
   Chuck Hirstius <chirstius@megapathdsl.net> (callback exit status, example)
   Grant Hopwood <hopwoodg@valero.com> (win32 port)
+  Mark Southern <mark_southern@merck.com> (bugfix)
 
 =cut
 
@@ -247,7 +251,7 @@ package Parallel::ForkManager;
 use POSIX ":sys_wait_h";
 use strict;
 use vars qw($VERSION);
-$VERSION='0.7.2';
+$VERSION='0.7.3';
 
 sub new { my ($c,$processes)=@_;
   my $h={
@@ -300,20 +304,14 @@ sub wait_children { my ($s)=@_;
 
 *wait_childs=*wait_children; # compatibility
 
-sub wait_one_child ($;$) { my ($s,$par)=@_;
+sub wait_one_child { my ($s,$par)=@_;
   my $kid;
   while (1) {
-    $kid = _waitpid(-1,$par||=0);
+    $kid = $s->_waitpid(-1,$par||=0);
     last if $kid == 0 || $kid == -1; # AS 5.6/Win32 returns negative PIDs
     redo if !exists $s->{processes}->{$kid};
-    $s->on_finish(
-      $kid, 
-      $? >> 8 ,
-      $s->{processes}->{$kid}, 
-      $? & 0x7f, 
-      $? & 0x80 ? 1 : 0
-    );
-    delete $s->{processes}->{$kid};
+    my $id = delete $s->{processes}->{$kid};
+    $s->on_finish( $kid, $? >> 8 , $id, $? & 0x7f, $? & 0x80 ? 1 : 0);
     last;
   }
   $kid;
@@ -357,7 +355,7 @@ sub set_max_procs { my ($s, $mp)=@_;
 # OS dependant code follows...
 
 sub _waitpid { # Call waitpid() in the standard Unix fashion.
-  return waitpid($_[0],$_[1]);
+  return waitpid($_[1],$_[2]);
 }
 
 # On ActiveState Perl 5.6/Win32 build 625, waitpid(-1, &WNOHANG) always
