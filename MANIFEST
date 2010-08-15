@@ -6,3 +6,4 @@ Makefile.PL
 test.pl
 ForkManager/parallel_get.pl
 ForkManager/callback.pl
+META.yml                                 Module meta-data (added by MakeMaker)
