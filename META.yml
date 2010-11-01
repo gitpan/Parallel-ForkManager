@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Parallel-ForkManager
-version:            0.7.8
+version:            0.7.9
 abstract:           ~
 author:  []
 license:            unknown
