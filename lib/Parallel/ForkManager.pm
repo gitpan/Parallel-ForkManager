@@ -121,6 +121,27 @@ Allows you to set a new maximum number of children to maintain.
 You can call this method to wait for all the processes which have been
 forked. This is a blocking wait.
 
+=item max_procs 
+
+Returns the maximal number of processes the object will fork.
+
+=item running_procs
+
+Returns the pids of the forked processes currently monitored by the
+C<Parallel::ForkManager>. Note that children are still reported as running
+until the fork manager harvest them, via the next call to
+C<start> or C<wait_all_children>.
+
+    my @pids = $pm->running_procs;
+
+    my $nbr_children =- $pm->running_procs;
+
+=item wait_for_available_procs( $n )
+
+Wait until C<$n> available process slots are available.
+If C<$n> is not given, defaults to I<1>.
+
+
 =back
 
 =head1 CALLBACKS
@@ -447,9 +468,11 @@ use Storable qw(store retrieve);
 use File::Spec;
 use File::Temp ();
 use File::Path ();
+use Carp;
+
 use strict;
 use vars qw($VERSION);
-$VERSION="1.07";
+$VERSION="1.08";
 $VERSION = eval $VERSION;
 
 sub new {
@@ -580,6 +603,25 @@ sub wait_all_children {
 
 *wait_all_childs=*wait_all_children; # compatibility;
 
+sub max_procs { $_[0]->{max_proc}; }
+
+sub running_procs {
+    my $self = shift;
+
+    my @pids = keys %{ $self->{processes} };
+    return @pids;
+}
+
+sub wait_for_available_procs {
+    my( $self, $nbr ) = @_;
+    $nbr ||= 1;
+
+    croak "nbr processes '$nbr' higher than the max nbr of processes (@{[ $self->max_procs ]})"
+        if $nbr > $self->max_procs;
+
+    $self->wait_one_child until $self->max_procs - $self->running_procs >= $nbr;
+}
+
 sub run_on_finish {
   my ($s,$code,$pid)=@_;
 
@@ -630,38 +672,39 @@ sub set_max_procs {
   $s->{max_proc} = $mp;
 }
 
-# OS dependant code follows...
-
 sub _waitpid { # Call waitpid() in the standard Unix fashion.
-  return waitpid($_[1],$_[2]);
+    my( $self, $pid, $flag ) = @_;
+
+    return $flag ? $self->_waitpid_non_blocking : $self->_waitpid_blocking;
 }
 
-# On ActiveState Perl 5.6/Win32 build 625, waitpid(-1, &WNOHANG) always
-# blocks unless an actual PID other than -1 is given.
-sub _NT_waitpid {
-  my ($s, $pid, $par) = @_;
+sub _waitpid_non_blocking {
+    my $self = shift;
 
-  if ($par == &WNOHANG) { # Need to nonblock on each of our PIDs in the pool.
-    my @pids = keys %{ $s->{processes} };
-    # Simulate -1 (no processes awaiting cleanup.)
-    return -1 unless scalar(@pids);
-    # Check each PID in the pool.
-    my $kid;
-    foreach $pid (@pids) {
-      $kid = waitpid($pid, $par);
-      return $kid if $kid != 0; # AS 5.6/Win32 returns negative PIDs.
+    for my $pid ( $self->running_procs ) {
+        my $p = waitpid $pid, &WNOHANG or next;
+        if ( $p == -1 ) {
+            warn "child process '$pid' disappeared. A call to `waitpid` outside of Parallel::ForkManager might have reaped it.\n";
+            # it's gone. let's clean the process entry
+            delete $self->{processes}{$pid};
+        }
+        else {
+            return $pid;
+        }
     }
-    return $kid;
-  } else { # Normal waitpid() call.
-    return waitpid($pid, $par);
-  }
+
+    return 0;
 }
 
-{
-  local $^W = 0;
-  if ($^O eq 'NT' or $^O eq 'MSWin32') {
-    *_waitpid = \&_NT_waitpid;
-  }
+sub _waitpid_blocking {
+    my $self = shift;
+
+    while() {
+        my $pid = $self->_waitpid_non_blocking;
+        return $pid if $pid;
+
+        sleep 1;
+    }
 }
 
 sub DESTROY {

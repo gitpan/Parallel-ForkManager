@@ -4,7 +4,7 @@
       "Balazs Szabo (dLux)"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142060",
+   "generated_by" : "ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142690",
    "license" : [
       "perl_5"
    ],
@@ -43,12 +43,16 @@
    "release_status" : "stable",
    "resources" : {
       "repository" : {
-         "url" : "http://code.google.com/p/perl-parallel-forkmanager/"
+         "type" : "git",
+         "url" : "https://github.com/dluxhu/perl-parallel-forkmanager.git",
+         "web" : "https://github.com/dluxhu/perl-parallel-forkmanager",
+         "x_license" : "http://dev.perl.org/licenses/"
       }
    },
-   "version" : "1.07",
+   "version" : "1.08",
    "x_contributors" : [
       "SZABGAB",
+      "YANICK",
       "Michael Gang",
       "Noah Robin <sitz@onastick.net>",
       "Chuck Hirstius <chirstius@megapathdsl.net>",

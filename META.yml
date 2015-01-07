@@ -7,7 +7,7 @@ build_requires:
 configure_requires:
   ExtUtils::MakeMaker: '0'
 dynamic_config: 1
-generated_by: 'ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142060'
+generated_by: 'ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142690'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -24,10 +24,11 @@ requires:
   POSIX: '0'
   Storable: '0'
 resources:
-  repository: http://code.google.com/p/perl-parallel-forkmanager/
-version: '1.07'
+  repository: https://github.com/dluxhu/perl-parallel-forkmanager.git
+version: '1.08'
 x_contributors:
   - SZABGAB
+  - YANICK
   - 'Michael Gang'
   - 'Noah Robin <sitz@onastick.net>'
   - 'Chuck Hirstius <chirstius@megapathdsl.net>'
