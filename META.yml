@@ -25,7 +25,7 @@ requires:
   Storable: '0'
 resources:
   repository: https://github.com/dluxhu/perl-parallel-forkmanager.git
-version: '1.08'
+version: '1.09'
 x_contributors:
   - SZABGAB
   - YANICK
